@@ -263,7 +263,16 @@ class PolymarketScanner:
     
     async def start_websocket(self):
         """Start WebSocket connection for real-time market updates"""
-        import websockets
+        log.info("🎬 WebSocket start method called")
+        
+        try:
+            import websockets
+            log.info("✅ websockets library imported successfully")
+        except ImportError as e:
+            log.error(f"❌ Failed to import websockets: {e}")
+            log.error("   Run: pip install websockets==12.0")
+            return
+        
         import asyncio
         
         ws_url = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
@@ -524,12 +533,22 @@ class PolymarketInterface:
         log.info("Starting Polymarket interface")
         
         # Run both API scanning and WebSocket concurrently
+        log.info("🔄 Starting API scan loop...")
+        log.info("🔄 Starting WebSocket connection...")
+        
         tasks = [
             self._api_scan_loop(),
             self.scanner.start_websocket()
         ]
         
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Gather with exception handling
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Log any exceptions
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                task_name = ["API scan loop", "WebSocket"][i]
+                log.error(f"❌ {task_name} failed: {result}")
     
     async def _api_scan_loop(self):
         """Periodic API scanning (backup for WebSocket)"""
