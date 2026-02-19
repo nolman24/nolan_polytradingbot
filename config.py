@@ -185,10 +185,10 @@ MARKET_TYPES = {
 
 # Keywords to identify Polymarket market types
 MARKET_KEYWORDS = {
-    "crypto_5m": ["5 min", "5-min", "5min", "five minute"],
-    "crypto_15m": ["15 min", "15-min", "15min", "fifteen minute"],
-    "crypto_1h": ["1 hour", "1-hour", "1hr", "one hour"],
-    "crypto_updown": ["up or down", "up/down", "higher or lower"],  # NEW!
+    "crypto_5m": ["5 minutes", "5 minute", "5-minute", "5min"],  # Now includes actual format!
+    "crypto_15m": ["15 minutes", "15 minute", "15-minute", "15min"],
+    "crypto_1h": ["1 hour", "60 minutes", "60 minute"],
+    "crypto_updown": ["up or down", "up/down", "higher or lower", "above or below"],
     "sports_live": ["live", "in-game", "in game"],
     "sports_pregame": ["nfl", "nba", "mlb", "soccer", "game", "match"],
     "stocks": ["stock", "share", "nasdaq", "s&p", "dow"],
