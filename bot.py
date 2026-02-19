@@ -88,11 +88,6 @@ class PolyArbBot:
         # Setup and initialize Telegram bot
         self.telegram_app = await self.telegram.setup()
         
-        if self.telegram_app:
-            await self.telegram_app.initialize()
-            await self.telegram_app.start()
-            self.telegram_app.updater.start_polling()
-        
         # Start all subsystems concurrently
         tasks = [
             self.market_feed.start(),
@@ -101,6 +96,13 @@ class PolyArbBot:
             self._trading_loop(),
         ]
         
+        # Add Telegram bot polling as a task
+        if self.telegram_app:
+            await self.telegram_app.initialize()
+            await self.telegram_app.start()
+            # Run polling in background
+            tasks.append(self._run_telegram_polling())
+        
         log.info("🚀 All systems online - bot is running!")
         
         try:
@@ -108,6 +110,18 @@ class PolyArbBot:
         except KeyboardInterrupt:
             log.info("Shutdown signal received")
             await self.stop()
+    
+    async def _run_telegram_polling(self):
+        """Run Telegram bot polling loop"""
+        try:
+            await self.telegram_app.updater.start_polling()
+            # Keep running until stop
+            while self.running:
+                await asyncio.sleep(1)
+        except Exception as e:
+            log.error(f"Telegram polling error: {e}")
+        finally:
+            await self.telegram_app.updater.stop()
     
     async def _trading_loop(self):
         """Main trading loop - scans for opportunities and executes"""
@@ -278,9 +292,8 @@ class PolyArbBot:
         log.info("Stopping PolyArb Bot...")
         self.running = False
         
-        # Stop Telegram bot first
+        # Stop Telegram bot
         if self.telegram_app:
-            self.telegram_app.updater.stop()
             await self.telegram_app.stop()
             await self.telegram_app.shutdown()
         
