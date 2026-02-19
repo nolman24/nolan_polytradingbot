@@ -341,6 +341,19 @@ class KrakenMonitor:
                 
         except Exception as e:
             log.error(f"Error handling Kraken message: {e}")
+    
+    async def stop(self):
+        """Stop monitor"""
+        self.running = False
+        if self.connection:
+            await self.connection.close()
+        log.info("Kraken monitor stopped")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SPORTS ODDS MONITOR
+# ═══════════════════════════════════════════════════════════════════════════
+
+class SportsOddsMonitor:
     """
     Monitor sports betting odds from The Odds API
     Polls API at configured intervals
