@@ -85,8 +85,13 @@ class PolyArbBot:
         
         self.running = True
         
-        # Setup Telegram bot
+        # Setup and initialize Telegram bot
         self.telegram_app = await self.telegram.setup()
+        
+        if self.telegram_app:
+            await self.telegram_app.initialize()
+            await self.telegram_app.start()
+            self.telegram_app.updater.start_polling()
         
         # Start all subsystems concurrently
         tasks = [
@@ -95,9 +100,6 @@ class PolyArbBot:
             self.positions.monitor_positions(),
             self._trading_loop(),
         ]
-        
-        if self.telegram_app:
-            tasks.append(self.telegram_app.run_polling())
         
         log.info("🚀 All systems online - bot is running!")
         
@@ -275,6 +277,12 @@ class PolyArbBot:
         """Stop the bot"""
         log.info("Stopping PolyArb Bot...")
         self.running = False
+        
+        # Stop Telegram bot first
+        if self.telegram_app:
+            self.telegram_app.updater.stop()
+            await self.telegram_app.stop()
+            await self.telegram_app.shutdown()
         
         await asyncio.gather(
             self.market_feed.stop(),
