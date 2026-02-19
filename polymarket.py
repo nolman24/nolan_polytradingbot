@@ -39,23 +39,49 @@ class PolymarketScanner:
         self.last_scan: Optional[datetime] = None
     
     async def scan_markets(self) -> List[PolymarketMarket]:
-        """Scan Polymarket for all relevant markets"""
+        """Scan Polymarket for all relevant markets including crypto"""
         try:
-            # Fetch active markets from Gamma API
+            all_markets = []
+            
+            # Strategy 1: Get general active markets with higher limit
             response = requests.get(
                 f"{POLYMARKET_GAMMA_API}/markets",
-                params={"active": True, "closed": False, "limit": 200},
+                params={"active": True, "closed": False, "limit": 1000},
                 timeout=API_TIMEOUT
             )
             
-            if response.status_code != 200:
-                log.error(f"Gamma API error: {response.status_code}")
-                return list(self.cached_markets.values())
+            if response.status_code == 200:
+                all_markets.extend(response.json())
             
-            markets_data = response.json()
+            # Strategy 2: Search specifically for crypto markets
+            crypto_searches = ["bitcoin", "ethereum", "btc", "eth", "xrp", "solana"]
+            for search_term in crypto_searches:
+                try:
+                    response = requests.get(
+                        f"{POLYMARKET_GAMMA_API}/markets",
+                        params={
+                            "active": True,
+                            "closed": False,
+                            "limit": 100,
+                            "search": search_term
+                        },
+                        timeout=API_TIMEOUT
+                    )
+                    
+                    if response.status_code == 200:
+                        search_results = response.json()
+                        # Add unique markets only
+                        existing_ids = {m.get("conditionId") for m in all_markets}
+                        for market in search_results:
+                            if market.get("conditionId") not in existing_ids:
+                                all_markets.append(market)
+                                existing_ids.add(market.get("conditionId"))
+                except Exception as e:
+                    log.debug(f"Search for {search_term} failed: {e}")
+            
+            # Parse all markets
             markets = []
-            
-            for market_data in markets_data:
+            for market_data in all_markets:
                 market = self._parse_market(market_data)
                 if market:
                     markets.append(market)
@@ -63,6 +89,14 @@ class PolymarketScanner:
             
             self.last_scan = datetime.now(timezone.utc)
             log.info(f"Scanned {len(markets)} Polymarket markets")
+            
+            # Debug: log market types found
+            type_counts = {}
+            for m in markets:
+                t = m.market_type.value
+                type_counts[t] = type_counts.get(t, 0) + 1
+            log.info(f"Market types: {type_counts}")
+            
             return markets
             
         except Exception as e:
