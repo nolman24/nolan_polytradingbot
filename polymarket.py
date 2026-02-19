@@ -83,13 +83,34 @@ class PolymarketScanner:
             if not market_type:
                 return None  # Not a market type we're monitoring
             
-            # Extract pricing
+            # Extract pricing - handle different API formats
             outcome_prices = data.get("outcomePrices", [])
-            if len(outcome_prices) < 2:
+            if not outcome_prices or len(outcome_prices) < 2:
                 return None
             
-            yes_price = float(outcome_prices[0])
-            no_price = float(outcome_prices[1])
+            # Parse prices - they might be strings, floats, or nested lists
+            try:
+                # If it's a string like "['0.5', '0.5']", parse it
+                if isinstance(outcome_prices, str):
+                    import ast
+                    outcome_prices = ast.literal_eval(outcome_prices)
+                
+                # Extract first element if nested
+                yes_val = outcome_prices[0]
+                no_val = outcome_prices[1]
+                
+                # Handle nested lists [[value]] 
+                if isinstance(yes_val, list):
+                    yes_val = yes_val[0] if yes_val else 0
+                if isinstance(no_val, list):
+                    no_val = no_val[0] if no_val else 0
+                
+                yes_price = float(yes_val)
+                no_price = float(no_val)
+                
+            except (ValueError, TypeError, IndexError) as e:
+                log.debug(f"Could not parse prices from {outcome_prices}: {e}")
+                return None
             
             # Get token IDs
             tokens = data.get("tokens", [])
