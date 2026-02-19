@@ -3,6 +3,7 @@ Polymarket CLOB API integration for trade execution and market monitoring
 """
 
 import asyncio
+import json
 import logging
 import requests
 from datetime import datetime, timezone, timedelta
@@ -276,14 +277,16 @@ class PolymarketScanner:
                     self.ws_connection = websocket
                     log.info("✅ Connected to Polymarket WebSocket")
                     
-                    # Subscribe to all market updates
-                    subscribe_msg = {
-                        "type": "subscribe",
-                        "channel": "market",
-                        "markets": "all"
-                    }
-                    await websocket.send(json.dumps(subscribe_msg))
-                    log.info("📡 Subscribed to market updates")
+                    # Try to subscribe (may not be needed)
+                    try:
+                        subscribe_msg = {
+                            "type": "subscribe",
+                            "channel": "market"
+                        }
+                        await websocket.send(json.dumps(subscribe_msg))
+                        log.info("📡 Sent subscription request")
+                    except Exception as e:
+                        log.debug(f"Subscription send failed (may not be needed): {e}")
                     
                     # Listen for messages
                     async for message in websocket:
@@ -297,12 +300,17 @@ class PolymarketScanner:
                             log.debug(f"WebSocket message error: {e}")
                             
             except Exception as e:
-                log.warning(f"WebSocket disconnected: {e}, reconnecting in 5s...")
-                await asyncio.sleep(5)
+                if self.ws_running:
+                    log.warning(f"WebSocket disconnected: {e}, reconnecting in 5s...")
+                    await asyncio.sleep(5)
     
     async def _handle_ws_message(self, data: Dict):
         """Handle incoming WebSocket market update"""
         try:
+            # Log first few messages to see format
+            if len(self.cached_markets) < 10:
+                log.info(f"📨 WebSocket message: {str(data)[:200]}")
+            
             # WebSocket might send different message formats
             # Try to extract market data
             market_data = None
@@ -313,6 +321,10 @@ class PolymarketScanner:
                     market_data = data["data"]
                 elif "question" in data:
                     market_data = data
+                elif "event" in data or "type" in data:
+                    # Might be a control message, skip
+                    log.debug(f"Control message: {data.get('type', data.get('event'))}")
+                    return
             
             if market_data:
                 market = self._parse_market(market_data)
