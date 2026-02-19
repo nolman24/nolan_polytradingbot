@@ -61,7 +61,33 @@ class PolymarketScanner:
             else:
                 log.error(f"General market fetch failed: {response.status_code}")
             
-            # Strategy 2: Try fetching markets closing soon (might include 5/15 min markets)
+            # Strategy 2: Try CLOB API markets endpoint
+            try:
+                log.info("Trying CLOB API for markets...")
+                clob_response = requests.get(
+                    "https://clob.polymarket.com/markets",
+                    params={"active": True, "next_cursor": ""},
+                    timeout=API_TIMEOUT
+                )
+                
+                if clob_response.status_code == 200:
+                    clob_data = clob_response.json()
+                    clob_markets = clob_data.get("data", [])
+                    log.info(f"   CLOB API returned {len(clob_markets)} markets")
+                    
+                    # Add unique markets
+                    existing_ids = {m.get("conditionId") for m in all_markets if m.get("conditionId")}
+                    for market in clob_markets:
+                        cond_id = market.get("condition_id") or market.get("conditionId")
+                        if cond_id and cond_id not in existing_ids:
+                            all_markets.append(market)
+                            existing_ids.add(cond_id)
+                else:
+                    log.debug(f"CLOB API returned {clob_response.status_code}")
+            except Exception as e:
+                log.debug(f"CLOB API fetch failed: {e}")
+            
+            # Strategy 3: Try fetching markets closing soon
             try:
                 log.info("Fetching markets closing soon...")
                 response = requests.get(
@@ -70,7 +96,7 @@ class PolymarketScanner:
                         "active": True, 
                         "closed": False,
                         "limit": 500,
-                        "order": "end_date_min"  # Try sorting by end date
+                        "order": "end_date_min"
                     },
                     timeout=API_TIMEOUT
                 )
@@ -84,7 +110,8 @@ class PolymarketScanner:
                             all_markets.append(market)
                             existing_ids.add(market.get("conditionId"))
                             new_count += 1
-                    log.info(f"   Added {new_count} closing-soon markets")
+                    if new_count > 0:
+                        log.info(f"   Added {new_count} closing-soon markets")
             except Exception as e:
                 log.debug(f"Closing-soon fetch failed: {e}")
             
@@ -275,43 +302,51 @@ class PolymarketScanner:
         
         import asyncio
         
-        ws_url = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+        # Try different WebSocket endpoints
+        ws_urls = [
+            "wss://ws-subscriptions-clob.polymarket.com/ws/market",
+            "wss://ws.polymarket.com/markets",
+        ]
+        
         self.ws_running = True
         
-        log.info("🔌 Connecting to Polymarket WebSocket...")
-        
-        while self.ws_running:
+        for ws_url in ws_urls:
+            log.info(f"🔌 Trying WebSocket: {ws_url}")
+            
             try:
-                async with websockets.connect(ws_url) as websocket:
+                async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as websocket:
                     self.ws_connection = websocket
-                    log.info("✅ Connected to Polymarket WebSocket")
+                    log.info(f"✅ Connected to {ws_url}")
                     
-                    # Try to subscribe (may not be needed)
-                    try:
-                        subscribe_msg = {
-                            "type": "subscribe",
-                            "channel": "market"
-                        }
-                        await websocket.send(json.dumps(subscribe_msg))
-                        log.info("📡 Sent subscription request")
-                    except Exception as e:
-                        log.debug(f"Subscription send failed (may not be needed): {e}")
+                    # Just listen - don't send subscription (might not be needed)
+                    log.info("👂 Listening for market updates...")
+                    
+                    message_count = 0
                     
                     # Listen for messages
                     async for message in websocket:
                         if not self.ws_running:
                             break
                         
+                        message_count += 1
+                        
+                        # Log first 5 messages to see format
+                        if message_count <= 5:
+                            log.info(f"📨 WebSocket message #{message_count}: {message[:300]}")
+                        
                         try:
                             data = json.loads(message)
                             await self._handle_ws_message(data)
+                        except json.JSONDecodeError as e:
+                            log.debug(f"Non-JSON message: {message[:100]}")
                         except Exception as e:
-                            log.debug(f"WebSocket message error: {e}")
+                            log.debug(f"Message processing error: {e}")
                             
             except Exception as e:
-                if self.ws_running:
-                    log.warning(f"WebSocket disconnected: {e}, reconnecting in 5s...")
-                    await asyncio.sleep(5)
+                log.warning(f"WebSocket {ws_url} failed: {e}")
+                continue  # Try next URL
+        
+        log.warning("❌ All WebSocket URLs failed - falling back to API only")
     
     async def _handle_ws_message(self, data: Dict):
         """Handle incoming WebSocket market update"""
