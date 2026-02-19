@@ -37,6 +37,8 @@ class PolymarketScanner:
     def __init__(self):
         self.cached_markets: Dict[str, PolymarketMarket] = {}
         self.last_scan: Optional[datetime] = None
+        self.ws_connection = None
+        self.ws_running = False
     
     async def scan_markets(self) -> List[PolymarketMarket]:
         """Scan Polymarket for all relevant markets including crypto"""
@@ -258,6 +260,82 @@ class PolymarketScanner:
         
         return None
     
+    async def start_websocket(self):
+        """Start WebSocket connection for real-time market updates"""
+        import websockets
+        import asyncio
+        
+        ws_url = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+        self.ws_running = True
+        
+        log.info("🔌 Connecting to Polymarket WebSocket...")
+        
+        while self.ws_running:
+            try:
+                async with websockets.connect(ws_url) as websocket:
+                    self.ws_connection = websocket
+                    log.info("✅ Connected to Polymarket WebSocket")
+                    
+                    # Subscribe to all market updates
+                    subscribe_msg = {
+                        "type": "subscribe",
+                        "channel": "market",
+                        "markets": "all"
+                    }
+                    await websocket.send(json.dumps(subscribe_msg))
+                    log.info("📡 Subscribed to market updates")
+                    
+                    # Listen for messages
+                    async for message in websocket:
+                        if not self.ws_running:
+                            break
+                        
+                        try:
+                            data = json.loads(message)
+                            await self._handle_ws_message(data)
+                        except Exception as e:
+                            log.debug(f"WebSocket message error: {e}")
+                            
+            except Exception as e:
+                log.warning(f"WebSocket disconnected: {e}, reconnecting in 5s...")
+                await asyncio.sleep(5)
+    
+    async def _handle_ws_message(self, data: Dict):
+        """Handle incoming WebSocket market update"""
+        try:
+            # WebSocket might send different message formats
+            # Try to extract market data
+            market_data = None
+            
+            if isinstance(data, dict):
+                # Could be direct market data or wrapped
+                if "data" in data:
+                    market_data = data["data"]
+                elif "question" in data:
+                    market_data = data
+            
+            if market_data:
+                market = self._parse_market(market_data)
+                
+                if market:
+                    # Add to cache
+                    is_new = market.condition_id not in self.cached_markets
+                    self.cached_markets[market.condition_id] = market
+                    
+                    # Log new crypto markets
+                    if is_new and "crypto" in market.market_type.value:
+                        log.info(f"🆕 New {market.market_type.value} market: {market.question[:50]}")
+                        
+        except Exception as e:
+            log.debug(f"Error handling WebSocket message: {e}")
+    
+    async def stop_websocket(self):
+        """Stop WebSocket connection"""
+        self.ws_running = False
+        if self.ws_connection:
+            await self.ws_connection.close()
+        log.info("WebSocket stopped")
+    
     def get_market(self, condition_id: str) -> Optional[PolymarketMarket]:
         """Get cached market by condition ID"""
         return self.cached_markets.get(condition_id)
@@ -429,10 +507,20 @@ class PolymarketInterface:
         self.running = False
     
     async def start(self):
-        """Start continuous market scanning"""
+        """Start continuous market scanning via API and WebSocket"""
         self.running = True
         log.info("Starting Polymarket interface")
         
+        # Run both API scanning and WebSocket concurrently
+        tasks = [
+            self._api_scan_loop(),
+            self.scanner.start_websocket()
+        ]
+        
+        await asyncio.gather(*tasks, return_exceptions=True)
+    
+    async def _api_scan_loop(self):
+        """Periodic API scanning (backup for WebSocket)"""
         while self.running:
             try:
                 await self.scanner.scan_markets()
@@ -466,4 +554,5 @@ class PolymarketInterface:
     async def stop(self):
         """Stop interface"""
         self.running = False
+        await self.scanner.stop_websocket()
         log.info("Polymarket interface stopped")
