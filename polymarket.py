@@ -58,7 +58,34 @@ class PolymarketScanner:
             else:
                 log.error(f"General market fetch failed: {response.status_code}")
             
-            # Strategy 2: Search specifically for crypto markets
+            # Strategy 2: Try fetching markets closing soon (might include 5/15 min markets)
+            try:
+                log.info("Fetching markets closing soon...")
+                response = requests.get(
+                    f"{POLYMARKET_GAMMA_API}/markets",
+                    params={
+                        "active": True, 
+                        "closed": False,
+                        "limit": 500,
+                        "order": "end_date_min"  # Try sorting by end date
+                    },
+                    timeout=API_TIMEOUT
+                )
+                
+                if response.status_code == 200:
+                    closing_soon = response.json()
+                    existing_ids = {m.get("conditionId") for m in all_markets}
+                    new_count = 0
+                    for market in closing_soon:
+                        if market.get("conditionId") not in existing_ids:
+                            all_markets.append(market)
+                            existing_ids.add(market.get("conditionId"))
+                            new_count += 1
+                    log.info(f"   Added {new_count} closing-soon markets")
+            except Exception as e:
+                log.debug(f"Closing-soon fetch failed: {e}")
+            
+            # Strategy 3: Search specifically for crypto markets
             crypto_searches = ["bitcoin", "ethereum", "btc", "eth", "xrp", "solana"]
             log.info("Searching for crypto markets...")
             for search_term in crypto_searches:
@@ -195,21 +222,39 @@ class PolymarketScanner:
         """Identify market type from question text"""
         q_lower = question.lower()
         
+        # Use word boundaries to avoid false matches (e.g., "Netherlands" shouldn't match "eth")
+        import re
+        crypto_words = [
+            r'\bbitcoin\b', r'\bbtc\b', 
+            r'\bethereum\b', r'\beth\b',
+            r'\bxrp\b', r'\bripple\b',
+            r'\bsolana\b', r'\bsol\b'
+        ]
+        
+        is_crypto = any(re.search(pattern, q_lower) for pattern in crypto_words)
+        
         # Log for debugging
-        if any(word in q_lower for word in ["bitcoin", "btc", "ethereum", "eth", "xrp", "solana", "sol"]):
+        if is_crypto:
             log.info(f"🔍 Checking crypto market: '{question[:80]}'")
             log.info(f"   Lowercase: '{q_lower[:80]}'")
+        
+        # Special handling for crypto time-based markets
+        has_time = any(pattern in q_lower for pattern in ["am est", "pm est", "am et", "pm et", " am ", " pm ", ":00", ":05", ":10", ":15", ":20", ":25", ":30", ":35", ":40", ":45", ":50", ":55"])
+        
+        if is_crypto and has_time:
+            log.info(f"   ✅ Matched crypto_5m (has time indicator)!")
+            return MarketType("crypto_5m")
         
         # Check each market type's keywords
         for market_type, keywords in MARKET_KEYWORDS.items():
             if any(kw in q_lower for kw in keywords):
-                if "crypto" in market_type:
+                if "crypto" in market_type and is_crypto:
                     log.info(f"   ✅ Matched {market_type}!")
                 return MarketType(market_type)
         
         # If it's a crypto-related question but didn't match, log it
-        if any(word in q_lower for word in ["bitcoin", "btc", "ethereum", "eth", "xrp", "solana", "sol"]):
-            log.warning(f"   ❌ Crypto market not matched: '{question[:80]}'")
+        if is_crypto:
+            log.debug(f"   ℹ️ Crypto market but no specific type: '{question[:60]}'")
         
         return None
     
