@@ -1,5 +1,6 @@
 """
 Polymarket CLOB API integration for trade execution and market monitoring
+Now using official py-clob-client SDK
 """
 
 import asyncio
@@ -10,6 +11,14 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict
 import hashlib
 import hmac
+
+try:
+    from py_clob_client.client import ClobClient
+    from py_clob_client.clob_types import ApiCreds
+    CLOB_CLIENT_AVAILABLE = True
+except ImportError:
+    CLOB_CLIENT_AVAILABLE = False
+    ClobClient = None
 
 from config import (
     POLYMARKET_CLOB_API,
@@ -40,13 +49,66 @@ class PolymarketScanner:
         self.last_scan: Optional[datetime] = None
         self.ws_connection = None
         self.ws_running = False
+        
+        # Initialize official Polymarket SDK client
+        if CLOB_CLIENT_AVAILABLE:
+            try:
+                self.clob_client = ClobClient(
+                    host="https://clob.polymarket.com",
+                    key="",  # Empty for public read-only access
+                    chain_id=137  # Polygon mainnet
+                )
+                log.info("✅ Official Polymarket SDK initialized")
+            except Exception as e:
+                log.warning(f"Failed to initialize SDK client: {e}")
+                self.clob_client = None
+        else:
+            log.warning("py-clob-client not installed, using direct API calls")
+            self.clob_client = None
     
     async def scan_markets(self) -> List[PolymarketMarket]:
         """Scan Polymarket for all relevant markets including crypto"""
         try:
             all_markets = []
             
-            # Strategy 1: Get general active markets with higher limit
+            # Strategy 1: Try official SDK client first (most reliable)
+            if self.clob_client:
+                try:
+                    log.info("📡 Fetching markets via official SDK...")
+                    
+                    # Try get_markets() method
+                    sdk_markets = self.clob_client.get_markets()
+                    if sdk_markets:
+                        log.info(f"   SDK get_markets() returned {len(sdk_markets)} markets")
+                        
+                        # Log sample market to see structure
+                        if len(sdk_markets) > 0:
+                            sample = sdk_markets[0]
+                            log.info(f"   Sample SDK market keys: {list(sample.keys())[:10]}")
+                            if "question" in sample or "market" in sample or "description" in sample:
+                                q = sample.get("question") or sample.get("market") or sample.get("description", "")
+                                log.info(f"   Sample question: '{q[:80]}'")
+                        
+                        all_markets.extend(sdk_markets)
+                    
+                    # Also try get_simplified_markets() if it exists
+                    try:
+                        simplified = self.clob_client.get_simplified_markets()
+                        if simplified:
+                            log.info(f"   SDK get_simplified_markets() returned {len(simplified)} markets")
+                            # Add unique ones
+                            existing_ids = {m.get("condition_id") or m.get("conditionId") for m in all_markets}
+                            for market in simplified:
+                                mid = market.get("condition_id") or market.get("conditionId")
+                                if mid and mid not in existing_ids:
+                                    all_markets.append(market)
+                    except AttributeError:
+                        log.debug("get_simplified_markets() not available")
+                        
+                except Exception as e:
+                    log.warning(f"SDK market fetch failed: {e}, falling back to direct API")
+            
+            # Strategy 2: Get general active markets with higher limit
             log.info("Fetching general active markets...")
             response = requests.get(
                 f"{POLYMARKET_GAMMA_API}/markets",
@@ -173,10 +235,11 @@ class PolymarketScanner:
             return list(self.cached_markets.values())
     
     def _parse_market(self, data: Dict) -> Optional[PolymarketMarket]:
-        """Parse market data from API response"""
+        """Parse market data from API response or SDK"""
         try:
-            question = data.get("question", "")
-            condition_id = data.get("conditionId", "")
+            # Handle both API format (conditionId) and SDK format (condition_id)
+            question = data.get("question") or data.get("market") or data.get("description", "")
+            condition_id = data.get("conditionId") or data.get("condition_id", "")
             
             if not question or not condition_id:
                 return None
@@ -187,7 +250,7 @@ class PolymarketScanner:
                 return None  # Not a market type we're monitoring
             
             # Extract pricing - handle different API formats
-            outcome_prices = data.get("outcomePrices", [])
+            outcome_prices = data.get("outcomePrices") or data.get("outcome_prices") or data.get("prices", [])
             if not outcome_prices or len(outcome_prices) < 2:
                 return None
             
