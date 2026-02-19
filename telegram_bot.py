@@ -223,6 +223,53 @@ class TelegramBot:
         # Send without markdown parsing to avoid errors
         await update.message.reply_text(msg)
     
+    async def list_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Show detailed list of actual markets being scanned"""
+        markets = await self.poly.get_markets()
+        
+        if not markets:
+            await update.message.reply_text("No markets loaded")
+            return
+        
+        # Group by type
+        by_type = {}
+        for m in markets:
+            t = m.market_type.value
+            if t not in by_type:
+                by_type[t] = []
+            by_type[t].append(m.question)
+        
+        # Build message
+        msg = "📋 Detailed Market List\n"
+        msg += "━━━━━━━━━━━━━━━━\n\n"
+        
+        for market_type in sorted(by_type.keys()):
+            questions = by_type[market_type]
+            safe_type = market_type.replace("_", " ").title()
+            msg += f"📊 {safe_type} ({len(questions)})\n"
+            
+            # Show first 3 markets of each type
+            for i, q in enumerate(questions[:3]):
+                # Truncate long questions
+                short_q = q[:60] + "..." if len(q) > 60 else q
+                msg += f"  • {short_q}\n"
+            
+            if len(questions) > 3:
+                msg += f"  ... and {len(questions) - 3} more\n"
+            
+            msg += "\n"
+        
+        msg += f"Total: {len(markets)} markets"
+        
+        # Split into multiple messages if too long
+        if len(msg) > 4000:
+            # Send first part
+            await update.message.reply_text(msg[:4000])
+            # Send remainder
+            await update.message.reply_text(msg[4000:])
+        else:
+            await update.message.reply_text(msg)
+    
     async def prices_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show current external prices"""
         btc = self.market_feed.get_btc_price()
@@ -256,7 +303,8 @@ class TelegramBot:
             "/opportunities - Current arbitrage opps\n"
             "/config - View bot configuration\n"
             "/pnl - Detailed P&L report\n"
-            "/markets - Active market count\n"
+            "/markets - Market count by type\n"
+            "/list - Detailed list of actual markets\n"
             "/prices - External price data\n"
             "/help - This help message"
         )
@@ -286,6 +334,7 @@ class TelegramBot:
         self.app.add_handler(CommandHandler("config", self.config_command))
         self.app.add_handler(CommandHandler("pnl", self.pnl_command))
         self.app.add_handler(CommandHandler("markets", self.markets_command))
+        self.app.add_handler(CommandHandler("list", self.list_command))
         self.app.add_handler(CommandHandler("prices", self.prices_command))
         self.app.add_handler(CommandHandler("help", self.help_command))
         
