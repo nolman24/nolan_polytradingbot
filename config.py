@@ -26,6 +26,22 @@ THE_ODDS_API_KEY = os.getenv("THE_ODDS_API_KEY", "")
 POLYMARKET_CLOB_API = "https://clob.polymarket.com"
 POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com"
 
+# Polymarket Series IDs for crypto markets
+# These are the "channels" that contain the rotating short-duration markets
+POLYMARKET_SERIES = {
+    "btc_15m": {
+        "series_id": "10192",
+        "series_slug": "btc-up-or-down-15m",
+        "market_type": "crypto_15m"
+    },
+    # Additional series can be added as we discover them
+    # "btc_5m": {"series_id": "TBD", "series_slug": "btc-up-or-down-5m", "market_type": "crypto_5m"},
+    # "eth_15m": {"series_id": "TBD", "series_slug": "eth-up-or-down-15m", "market_type": "crypto_15m"},
+}
+
+# Polymarket live data WebSocket (the correct one!)
+POLYMARKET_LIVE_WS_URL = "wss://ws-live-data.polymarket.com"
+
 # ═══════════════════════════════════════════════════════════════════════════
 # TRADING PARAMETERS
 # ═══════════════════════════════════════════════════════════════════════════
