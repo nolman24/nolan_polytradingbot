@@ -44,6 +44,7 @@ class PolymarketScanner:
             all_markets = []
             
             # Strategy 1: Get general active markets with higher limit
+            log.info("Fetching general active markets...")
             response = requests.get(
                 f"{POLYMARKET_GAMMA_API}/markets",
                 params={"active": True, "closed": False, "limit": 1000},
@@ -51,10 +52,15 @@ class PolymarketScanner:
             )
             
             if response.status_code == 200:
-                all_markets.extend(response.json())
+                general_markets = response.json()
+                all_markets.extend(general_markets)
+                log.info(f"   Got {len(general_markets)} general markets")
+            else:
+                log.error(f"General market fetch failed: {response.status_code}")
             
             # Strategy 2: Search specifically for crypto markets
             crypto_searches = ["bitcoin", "ethereum", "btc", "eth", "xrp", "solana"]
+            log.info("Searching for crypto markets...")
             for search_term in crypto_searches:
                 try:
                     response = requests.get(
@@ -70,17 +76,23 @@ class PolymarketScanner:
                     
                     if response.status_code == 200:
                         search_results = response.json()
+                        log.info(f"   Search '{search_term}': found {len(search_results)} markets")
                         # Add unique markets only
                         existing_ids = {m.get("conditionId") for m in all_markets}
+                        new_count = 0
                         for market in search_results:
                             if market.get("conditionId") not in existing_ids:
                                 all_markets.append(market)
                                 existing_ids.add(market.get("conditionId"))
+                                new_count += 1
+                        if new_count > 0:
+                            log.info(f"   Added {new_count} new markets from '{search_term}' search")
                 except Exception as e:
                     log.debug(f"Search for {search_term} failed: {e}")
             
             # Parse all markets
             markets = []
+            log.info(f"Parsing {len(all_markets)} total markets...")
             for market_data in all_markets:
                 market = self._parse_market(market_data)
                 if market:
@@ -183,10 +195,21 @@ class PolymarketScanner:
         """Identify market type from question text"""
         q_lower = question.lower()
         
+        # Log for debugging
+        if any(word in q_lower for word in ["bitcoin", "btc", "ethereum", "eth", "xrp", "solana", "sol"]):
+            log.info(f"🔍 Checking crypto market: '{question[:80]}'")
+            log.info(f"   Lowercase: '{q_lower[:80]}'")
+        
         # Check each market type's keywords
         for market_type, keywords in MARKET_KEYWORDS.items():
             if any(kw in q_lower for kw in keywords):
+                if "crypto" in market_type:
+                    log.info(f"   ✅ Matched {market_type}!")
                 return MarketType(market_type)
+        
+        # If it's a crypto-related question but didn't match, log it
+        if any(word in q_lower for word in ["bitcoin", "btc", "ethereum", "eth", "xrp", "solana", "sol"]):
+            log.warning(f"   ❌ Crypto market not matched: '{question[:80]}'")
         
         return None
     
