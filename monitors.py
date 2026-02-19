@@ -134,30 +134,82 @@ class BinanceMonitor:
         await asyncio.gather(*tasks, return_exceptions=True)
     
     async def _monitor_symbol(self, symbol: str):
-        """Monitor a single symbol with auto-reconnect"""
+        """Monitor a single symbol with auto-reconnect and REST API fallback"""
         ws_url = BINANCE_STREAMS.get(symbol)
         if not ws_url:
             log.error(f"No WebSocket URL configured for {symbol}")
             return
         
+        ws_failures = 0
+        max_ws_failures = 3
+        
         while self.running:
             try:
-                async with websockets.connect(ws_url) as websocket:
-                    self.connections[symbol] = websocket
-                    log.info(f"✅ Connected to Binance {symbol} stream")
-                    
-                    async for message in websocket:
-                        if not self.running:
-                            break
+                # Try WebSocket connection first
+                if ws_failures < max_ws_failures:
+                    try:
+                        async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as websocket:
+                            self.connections[symbol] = websocket
+                            log.info(f"✅ Connected to Binance {symbol} WebSocket")
+                            ws_failures = 0  # Reset on successful connection
+                            
+                            async for message in websocket:
+                                if not self.running:
+                                    break
+                                await self._handle_message(symbol, message)
+                    except Exception as ws_error:
+                        ws_failures += 1
+                        log.warning(f"Binance {symbol} WebSocket failed ({ws_failures}/{max_ws_failures}): {ws_error}")
+                        if ws_failures >= max_ws_failures:
+                            log.info(f"Switching to REST API polling for {symbol}")
+                        await asyncio.sleep(2)
+                else:
+                    # Fall back to REST API polling
+                    await self._poll_rest_api(symbol)
                         
-                        await self._handle_message(symbol, message)
-                        
-            except ConnectionClosed:
-                log.warning(f"Binance {symbol} connection closed, reconnecting...")
-                await asyncio.sleep(2)
             except Exception as e:
                 log.error(f"Binance {symbol} error: {e}")
                 await asyncio.sleep(5)
+    
+    async def _poll_rest_api(self, symbol: str):
+        """Poll Binance REST API when WebSocket fails"""
+        import aiohttp
+        
+        api_url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
+        
+        async with aiohttp.ClientSession() as session:
+            while self.running:
+                try:
+                    async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            price = float(data.get("price", 0))
+                            
+                            if price > 0:
+                                # Create price object
+                                price_obj = ExternalPrice(
+                                    source="binance_rest",
+                                    symbol=symbol,
+                                    price=price,
+                                    timestamp=datetime.now(timezone.utc),
+                                    metadata={"method": "REST API"}
+                                )
+                                
+                                # Update aggregator if available
+                                if self.aggregator:
+                                    self.aggregator.update_price(symbol, "binance", price)
+                                
+                                # Store latest
+                                self.latest_prices[symbol] = price_obj
+                                
+                        else:
+                            log.warning(f"Binance REST API returned {response.status} for {symbol}")
+                            
+                except Exception as e:
+                    log.debug(f"REST API polling error for {symbol}: {e}")
+                
+                # Poll every 2 seconds (slower than WebSocket but more reliable)
+                await asyncio.sleep(2)
     
     async def _handle_message(self, symbol: str, message: str):
         """Process incoming price update"""
