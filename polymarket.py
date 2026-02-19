@@ -17,9 +17,10 @@ from config import (
     POLYMARKET_SECRET,
     MARKET_CONFIG,
     API_TIMEOUT,
-    MAX_API_RETRIES
+    MAX_API_RETRIES,
+    MARKET_KEYWORDS
 )
-from models import PolymarketMarket, MarketType, Side, MARKET_KEYWORDS
+from models import PolymarketMarket, MarketType, Side
 
 log = logging.getLogger(__name__)
 
