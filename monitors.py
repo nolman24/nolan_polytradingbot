@@ -114,7 +114,7 @@ class BinanceMonitor:
     Ultra-low latency for crypto arbitrage
     """
     
-    def __init__(self, aggregator: PriceAggregator):
+    def __init__(self, aggregator=None):
         self.aggregator = aggregator
         self.connections: Dict[str, websockets.WebSocketClientProtocol] = {}
         self.latest_prices: Dict[str, ExternalPrice] = {}
@@ -169,8 +169,9 @@ class BinanceMonitor:
             if price <= 0:
                 return
             
-            # Update aggregator
-            self.aggregator.update_price(symbol, "binance", price)
+            # Update aggregator if available
+            if self.aggregator:
+                self.aggregator.update_price(symbol, "binance", price)
             
             # Create price object
             price_obj = ExternalPrice(
