@@ -210,13 +210,18 @@ class TelegramBot:
             t = m.market_type.value
             by_type[t] = by_type.get(t, 0) + 1
         
-        msg = "🏪 *Active Markets*\n━━━━━━━━━━━━━━━━\n"
+        # Build message without markdown to avoid parsing errors
+        msg = "🏪 Active Markets\n"
+        msg += "━━━━━━━━━━━━━━━━\n"
         for market_type, count in sorted(by_type.items()):
-            msg += f"{market_type}: {count}\n"
+            # Escape special characters that could break parsing
+            safe_type = market_type.replace("_", " ").replace("*", "").replace("[", "").replace("]", "")
+            msg += f"{safe_type}: {count}\n"
         
         msg += f"\nTotal: {len(markets)} markets"
         
-        await update.message.reply_text(msg, parse_mode="Markdown")
+        # Send without markdown parsing to avoid errors
+        await update.message.reply_text(msg)
     
     async def prices_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Show current external prices"""
