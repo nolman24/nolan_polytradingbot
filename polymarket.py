@@ -25,6 +25,8 @@ from config import (
     POLYMARKET_GAMMA_API,
     POLYMARKET_API_KEY,
     POLYMARKET_SECRET,
+    POLYMARKET_SERIES,
+    POLYMARKET_LIVE_WS_URL,
     MARKET_CONFIG,
     API_TIMEOUT,
     MAX_API_RETRIES,
@@ -53,17 +55,19 @@ class PolymarketScanner:
         # Initialize official Polymarket SDK client
         if CLOB_CLIENT_AVAILABLE:
             try:
+                # Try without credentials first (public read-only)
                 self.clob_client = ClobClient(
                     host="https://clob.polymarket.com",
-                    key="",  # Empty for public read-only access
-                    chain_id=137  # Polygon mainnet
+                    key="",
+                    chain_id=137,  # Polygon mainnet
+                    funder=""
                 )
                 log.info("✅ Official Polymarket SDK initialized")
             except Exception as e:
-                log.warning(f"Failed to initialize SDK client: {e}")
+                log.warning(f"SDK initialization failed: {e}, will use direct API")
                 self.clob_client = None
         else:
-            log.warning("py-clob-client not installed, using direct API calls")
+            log.warning("py-clob-client not installed")
             self.clob_client = None
     
     async def scan_markets(self) -> List[PolymarketMarket]:
@@ -71,7 +75,44 @@ class PolymarketScanner:
         try:
             all_markets = []
             
-            # Strategy 1: Try official SDK client first (most reliable)
+            # Strategy 1: Fetch markets by SERIES (the correct way for 5/15-min markets!)
+            log.info("📡 Fetching markets by series (crypto 5/15-min)...")
+            for series_key, series_info in POLYMARKET_SERIES.items():
+                try:
+                    series_id = series_info["series_id"]
+                    series_slug = series_info["series_slug"]
+                    
+                    log.info(f"   Fetching series: {series_slug} (ID: {series_id})")
+                    
+                    # Try Gamma API with series filter
+                    response = requests.get(
+                        f"{POLYMARKET_GAMMA_API}/markets",
+                        params={
+                            "active": True,
+                            "closed": False,
+                            "series_id": series_id
+                        },
+                        timeout=API_TIMEOUT
+                    )
+                    
+                    if response.status_code == 200:
+                        series_markets = response.json()
+                        log.info(f"   ✅ Series {series_slug}: found {len(series_markets)} markets")
+                        
+                        # Log sample market from series
+                        if len(series_markets) > 0:
+                            sample = series_markets[0]
+                            q = sample.get("question", "")
+                            log.info(f"   📋 Latest market: '{q[:70]}'")
+                        
+                        all_markets.extend(series_markets)
+                    else:
+                        log.debug(f"Series fetch returned {response.status_code}")
+                        
+                except Exception as e:
+                    log.warning(f"Failed to fetch series {series_key}: {e}")
+            
+            # Strategy 2: Try official SDK client if available
             if self.clob_client:
                 try:
                     log.info("📡 Fetching markets via official SDK...")
@@ -365,24 +406,33 @@ class PolymarketScanner:
         
         import asyncio
         
-        # Try different WebSocket endpoints
-        ws_urls = [
-            "wss://ws-subscriptions-clob.polymarket.com/ws/market",
-            "wss://ws.polymarket.com/markets",
-        ]
-        
+        # Use the CORRECT WebSocket URL for live data
+        ws_url = POLYMARKET_LIVE_WS_URL
         self.ws_running = True
         
-        for ws_url in ws_urls:
-            log.info(f"🔌 Trying WebSocket: {ws_url}")
-            
+        log.info(f"🔌 Connecting to Polymarket Live Data WebSocket...")
+        log.info(f"   URL: {ws_url}")
+        
+        while self.ws_running:
             try:
                 async with websockets.connect(ws_url, ping_interval=20, ping_timeout=10) as websocket:
                     self.ws_connection = websocket
-                    log.info(f"✅ Connected to {ws_url}")
+                    log.info(f"✅ Connected to Polymarket Live Data!")
                     
-                    # Just listen - don't send subscription (might not be needed)
-                    log.info("👂 Listening for market updates...")
+                    # Subscribe to series updates
+                    for series_key, series_info in POLYMARKET_SERIES.items():
+                        try:
+                            subscribe_msg = {
+                                "type": "subscribe",
+                                "channel": "series",
+                                "series_id": series_info["series_id"]
+                            }
+                            await websocket.send(json.dumps(subscribe_msg))
+                            log.info(f"📡 Subscribed to series: {series_info['series_slug']}")
+                        except Exception as e:
+                            log.debug(f"Subscription to {series_key} failed: {e}")
+                    
+                    log.info("👂 Listening for live market updates...")
                     
                     message_count = 0
                     
@@ -406,10 +456,12 @@ class PolymarketScanner:
                             log.debug(f"Message processing error: {e}")
                             
             except Exception as e:
-                log.warning(f"WebSocket {ws_url} failed: {e}")
-                continue  # Try next URL
+                if self.ws_running:
+                    log.warning(f"WebSocket disconnected: {e}")
+                    log.info("   Reconnecting in 5 seconds...")
+                    await asyncio.sleep(5)
         
-        log.warning("❌ All WebSocket URLs failed - falling back to API only")
+        log.info("WebSocket loop ended")
     
     async def _handle_ws_message(self, data: Dict):
         """Handle incoming WebSocket market update"""
