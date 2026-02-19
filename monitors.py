@@ -172,44 +172,60 @@ class BinanceMonitor:
                 await asyncio.sleep(5)
     
     async def _poll_rest_api(self, symbol: str):
-        """Poll Binance REST API when WebSocket fails"""
+        """Poll price API when WebSocket fails - tries multiple sources"""
         import aiohttp
         
-        api_url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
+        # Map Binance symbols to coin IDs
+        coin_map = {
+            "BTCUSDT": "bitcoin",
+            "ETHUSDT": "ethereum",
+            "XRPUSDT": "ripple",
+            "SOLUSDT": "solana"
+        }
+        
+        coin_id = coin_map.get(symbol)
+        if not coin_id:
+            log.error(f"No coin mapping for {symbol}")
+            return
+        
+        # Try CoinGecko (free, no API key needed)
+        coingecko_url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
         
         async with aiohttp.ClientSession() as session:
             while self.running:
                 try:
-                    async with session.get(api_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    # Try CoinGecko first
+                    async with session.get(coingecko_url, timeout=aiohttp.ClientTimeout(total=5)) as response:
                         if response.status == 200:
                             data = await response.json()
-                            price = float(data.get("price", 0))
+                            price = float(data.get(coin_id, {}).get("usd", 0))
                             
                             if price > 0:
                                 # Create price object
                                 price_obj = ExternalPrice(
-                                    source="binance_rest",
+                                    source="coingecko",
                                     symbol=symbol,
                                     price=price,
                                     timestamp=datetime.now(timezone.utc),
-                                    metadata={"method": "REST API"}
+                                    metadata={"method": "CoinGecko API"}
                                 )
                                 
                                 # Update aggregator if available
                                 if self.aggregator:
-                                    self.aggregator.update_price(symbol, "binance", price)
+                                    self.aggregator.update_price(symbol, "coingecko", price)
                                 
                                 # Store latest
                                 self.latest_prices[symbol] = price_obj
+                                log.debug(f"✅ {symbol}: ${price:,.2f} (CoinGecko)")
                                 
                         else:
-                            log.warning(f"Binance REST API returned {response.status} for {symbol}")
+                            log.debug(f"CoinGecko returned {response.status} for {symbol}")
                             
                 except Exception as e:
-                    log.debug(f"REST API polling error for {symbol}: {e}")
+                    log.debug(f"CoinGecko error for {symbol}: {e}")
                 
-                # Poll every 2 seconds (slower than WebSocket but more reliable)
-                await asyncio.sleep(2)
+                # Poll every 3 seconds (CoinGecko rate limit: ~50/min)
+                await asyncio.sleep(3)
     
     async def _handle_message(self, symbol: str, message: str):
         """Process incoming price update"""
