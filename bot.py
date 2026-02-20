@@ -6,7 +6,7 @@ Main orchestrator that coordinates all systems
 import asyncio
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from config import (
     TRADING_CONFIG,
@@ -127,6 +127,16 @@ class PolyArbBot:
         """Main trading loop - scans for opportunities and executes"""
         log.info("Trading loop started")
         
+        # Wait a few seconds for price feeds to connect
+        await asyncio.sleep(5)
+        
+        # Diagnostic: Check if price feeds are working
+        btc_test = self.market_feed.get_btc_price()
+        if btc_test:
+            log.info(f"✅ Price feed working! BTC: ${btc_test:,.2f}")
+        else:
+            log.warning("⚠️ Price feed not ready yet - waiting for connection...")
+        
         while self.running:
             try:
                 # Get all markets
@@ -161,6 +171,19 @@ class PolyArbBot:
         xrp_price = self.market_feed.get_xrp_price()
         sol_price = self.market_feed.get_sol_price()
         
+        # Diagnostic logging
+        if btc_price:
+            log.debug(f"💵 Current BTC: ${btc_price:,.2f}")
+        else:
+            log.warning("⚠️ No BTC price available from feed!")
+        
+        crypto_markets_found = 0
+        opportunities_found = 0
+        markets_filtered = 0
+        
+        # Get current time
+        now = datetime.now(timezone.utc)
+        
         for market in markets:
             # Check all crypto market types including Up/Down
             if market.market_type not in [
@@ -170,6 +193,37 @@ class PolyArbBot:
                 MarketType.CRYPTO_UPDOWN  # NEW!
             ]:
                 continue
+            
+            crypto_markets_found += 1
+            
+            # CRITICAL: Filter out past/expired markets with DYNAMIC buffers
+            if market.end_time:
+                # Skip if market ended more than 2 minutes ago
+                if market.end_time < now - timedelta(minutes=2):
+                    markets_filtered += 1
+                    log.debug(f"⏭️ Skipping expired market: {market.question[:40]}")
+                    continue
+                
+                # Dynamic buffer based on market type (skip last 20-30% of market duration)
+                if market.market_type == MarketType.CRYPTO_5M:
+                    # 5-minute markets: Skip last 1 minute (trade in first 4 minutes)
+                    min_time_buffer = 1.0
+                elif market.market_type == MarketType.CRYPTO_15M:
+                    # 15-minute markets: Skip last 3 minutes (trade in first 12 minutes)
+                    min_time_buffer = 3.0
+                elif market.market_type == MarketType.CRYPTO_1H:
+                    # 1-hour markets: Skip last 10 minutes (trade in first 50 minutes)
+                    min_time_buffer = 10.0
+                else:
+                    # Default: Skip last 2 minutes
+                    min_time_buffer = 2.0
+                
+                # Skip if market ends too soon
+                if market.end_time < now + timedelta(minutes=min_time_buffer):
+                    markets_filtered += 1
+                    time_left = (market.end_time - now).total_seconds() / 60
+                    log.debug(f"⏭️ Skipping market ending soon: {market.question[:40]} ({time_left:.1f} min left, need {min_time_buffer:.0f}+ min)")
+                    continue
             
             # Check if it's BTC, ETH, XRP, or SOL
             q_lower = market.question.lower()
@@ -191,8 +245,25 @@ class PolyArbBot:
             opp = self.arbitrage.analyze_crypto_market(market, price)
             
             if opp:
+                # CRITICAL: Reject obviously broken edge calculations
+                if opp.edge_percent > 100:
+                    log.warning(f"⚠️ Rejecting impossible edge: {opp.edge_percent:.1f}% on {market.question[:40]}")
+                    continue
+                
+                opportunities_found += 1
+                time_remaining = (market.end_time - now).total_seconds() / 60 if market.end_time else None
+                time_str = f"{time_remaining:.1f} min" if time_remaining else "unknown"
+                log.debug(f"🔍 Opportunity: {market.question[:40]} | Edge: {opp.edge_percent:.1f}% | Time left: {time_str}")
                 self.arbitrage.add_opportunity(opp)
                 await self._consider_trade(opp)
+        
+        # Log summary every 10 scans
+        if not hasattr(self, '_scan_count'):
+            self._scan_count = 0
+        self._scan_count += 1
+        
+        if self._scan_count % 10 == 0:
+            log.info(f"📊 Scan #{self._scan_count}: {crypto_markets_found} crypto markets, {markets_filtered} filtered, {opportunities_found} opportunities")
     
     async def _scan_sports_markets(self, markets: list):
         """Scan sports markets for arbitrage"""
