@@ -81,8 +81,40 @@ class PolymarketScanner:
                 try:
                     series_id = series_info["series_id"]
                     series_slug = series_info["series_slug"]
+                    crypto = series_info.get("crypto", "CRYPTO")
                     
-                    log.info(f"   Fetching series: {series_slug} (ID: {series_id})")
+                    log.info(f"   Fetching series: {series_slug} ({crypto})")
+                    
+                    # If series_id is unknown, try to discover it by fetching a recent event
+                    if series_id is None:
+                        try:
+                            # Search for recent events with this slug pattern
+                            search_response = requests.get(
+                                f"{POLYMARKET_GAMMA_API}/events",
+                                params={
+                                    "active": True,
+                                    "closed": False,
+                                    "limit": 1
+                                },
+                                timeout=API_TIMEOUT
+                            )
+                            
+                            if search_response.status_code == 200:
+                                events = search_response.json()
+                                for event in events:
+                                    event_slug = event.get("slug", "")
+                                    if series_slug.replace("-15m", "").replace("-5m", "") in event_slug:
+                                        series_id = event.get("series")
+                                        if series_id:
+                                            log.info(f"   ✅ Discovered series_id: {series_id} for {series_slug}")
+                                            break
+                        except Exception as e:
+                            log.debug(f"Series ID discovery failed for {series_slug}: {e}")
+                    
+                    # If we still don't have series_id, skip this series
+                    if series_id is None:
+                        log.debug(f"   ⏭️  Skipping {series_slug} (series_id unknown)")
+                        continue
                     
                     # CORRECT: Query /events endpoint with series_id (not /markets)
                     response = requests.get(
@@ -106,8 +138,8 @@ class PolymarketScanner:
                             event_markets = event.get("markets", [])
                             series_markets.extend(event_markets)
                             
-                            # Log sample
-                            if event_markets:
+                            # Log sample (first one only)
+                            if event_markets and len(series_markets) == len(event_markets):
                                 sample = event_markets[0]
                                 q = sample.get("question", "")
                                 log.info(f"   📋 Market: '{q[:70]}'")
