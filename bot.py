@@ -204,19 +204,19 @@ class PolyArbBot:
                     log.debug(f"⏭️ Skipping expired market: {market.question[:40]}")
                     continue
                 
-                # Dynamic buffer based on market type (skip last 20-30% of market duration)
+                # Dynamic buffer based on market type (skip last 25-40% of market duration)
                 if market.market_type == MarketType.CRYPTO_5M:
-                    # 5-minute markets: Skip last 1 minute (trade in first 4 minutes)
-                    min_time_buffer = 1.0
-                elif market.market_type == MarketType.CRYPTO_15M:
-                    # 15-minute markets: Skip last 3 minutes (trade in first 12 minutes)
-                    min_time_buffer = 3.0
-                elif market.market_type == MarketType.CRYPTO_1H:
-                    # 1-hour markets: Skip last 10 minutes (trade in first 50 minutes)
-                    min_time_buffer = 10.0
-                else:
-                    # Default: Skip last 2 minutes
+                    # 5-minute markets: Skip last 2 minutes (40% of duration)
                     min_time_buffer = 2.0
+                elif market.market_type == MarketType.CRYPTO_15M:
+                    # 15-minute markets: Skip last 5 minutes (33% of duration)
+                    min_time_buffer = 5.0
+                elif market.market_type == MarketType.CRYPTO_1H:
+                    # 1-hour markets: Skip last 15 minutes (25% of duration)
+                    min_time_buffer = 15.0
+                else:
+                    # Default: Skip last 3 minutes
+                    min_time_buffer = 3.0
                 
                 # Skip if market ends too soon
                 if market.end_time < now + timedelta(minutes=min_time_buffer):
@@ -245,9 +245,10 @@ class PolyArbBot:
             opp = self.arbitrage.analyze_crypto_market(market, price)
             
             if opp:
-                # CRITICAL: Reject obviously broken edge calculations
-                if opp.edge_percent > 100:
-                    log.warning(f"⚠️ Rejecting impossible edge: {opp.edge_percent:.1f}% on {market.question[:40]}")
+                # CRITICAL: Reject obviously broken or suspicious edge calculations
+                # Real latency arbitrage is typically 0.5-5%, anything >20% is suspicious
+                if opp.edge_percent > 20:
+                    log.warning(f"⚠️ Rejecting suspicious edge: {opp.edge_percent:.1f}% on {market.question[:40]}")
                     continue
                 
                 opportunities_found += 1
