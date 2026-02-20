@@ -84,27 +84,35 @@ class PolymarketScanner:
                     
                     log.info(f"   Fetching series: {series_slug} (ID: {series_id})")
                     
-                    # Try Gamma API with series filter
+                    # CORRECT: Query /events endpoint with series_id (not /markets)
                     response = requests.get(
-                        f"{POLYMARKET_GAMMA_API}/markets",
+                        f"{POLYMARKET_GAMMA_API}/events",
                         params={
+                            "series_id": series_id,
                             "active": True,
                             "closed": False,
-                            "series_id": series_id
+                            "limit": 100
                         },
                         timeout=API_TIMEOUT
                     )
                     
                     if response.status_code == 200:
-                        series_markets = response.json()
-                        log.info(f"   ✅ Series {series_slug}: found {len(series_markets)} markets")
+                        events = response.json()
+                        log.info(f"   ✅ Series {series_slug}: found {len(events)} events")
                         
-                        # Log sample market from series
-                        if len(series_markets) > 0:
-                            sample = series_markets[0]
-                            q = sample.get("question", "")
-                            log.info(f"   📋 Latest market: '{q[:70]}'")
+                        # Extract markets from events
+                        series_markets = []
+                        for event in events:
+                            event_markets = event.get("markets", [])
+                            series_markets.extend(event_markets)
+                            
+                            # Log sample
+                            if event_markets:
+                                sample = event_markets[0]
+                                q = sample.get("question", "")
+                                log.info(f"   📋 Market: '{q[:70]}'")
                         
+                        log.info(f"   Total markets in series: {len(series_markets)}")
                         all_markets.extend(series_markets)
                     else:
                         log.debug(f"Series fetch returned {response.status_code}")
