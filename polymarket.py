@@ -382,17 +382,17 @@ class PolymarketScanner:
                     # Parse ISO format datetime
                     end_time = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
                 else:
-                    # NO DEFAULT! If we don't have end time, skip this market
-                    log.warning(f"Market missing end_date, skipping: {question[:60]}")
-                    return None
+                    # Default to reasonable time in future (but log it)
+                    log.debug(f"Market missing end_date, using 2hr default: {question[:60]}")
+                    end_time = datetime.now(timezone.utc) + timedelta(hours=2)
             except Exception as e:
-                log.warning(f"Failed to parse end_date '{end_date_str}' for market: {question[:60]}")
-                return None
+                log.debug(f"Failed to parse end_date '{end_date_str}', using 2hr default: {question[:60]}")
+                end_time = datetime.now(timezone.utc) + timedelta(hours=2)
             
-            # Validate end time is not in past
+            # Validate end time is not TOO FAR in past (allow some buffer for just-closed markets)
             now = datetime.now(timezone.utc)
-            if end_time < now - timedelta(minutes=10):
-                log.debug(f"Skipping expired market: {question[:60]} (ended {(now - end_time).total_seconds()/60:.0f} min ago)")
+            if end_time < now - timedelta(hours=2):
+                log.debug(f"Skipping very old market: {question[:60]} (ended {(now - end_time).total_seconds()/3600:.1f} hours ago)")
                 return None
             
             # Additional metrics
