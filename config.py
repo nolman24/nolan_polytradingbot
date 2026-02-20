@@ -29,14 +29,61 @@ POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com"
 # Polymarket Series IDs for crypto markets
 # These are the "channels" that contain the rotating short-duration markets
 POLYMARKET_SERIES = {
+    # BTC Markets
     "btc_15m": {
-        "series_id": "10192",
+        "series_id": "10192",  # Confirmed working!
         "series_slug": "btc-up-or-down-15m",
-        "market_type": "crypto_15m"
+        "market_type": "crypto_15m",
+        "crypto": "BTC"
     },
-    # Additional series can be added as we discover them
-    # "btc_5m": {"series_id": "TBD", "series_slug": "btc-up-or-down-5m", "market_type": "crypto_5m"},
-    # "eth_15m": {"series_id": "TBD", "series_slug": "eth-up-or-down-15m", "market_type": "crypto_15m"},
+    "btc_5m": {
+        "series_id": None,  # Will be discovered via API
+        "series_slug": "btc-up-or-down-5m",
+        "market_type": "crypto_5m",
+        "crypto": "BTC"
+    },
+    
+    # ETH Markets
+    "eth_15m": {
+        "series_id": None,  # Will be discovered via API
+        "series_slug": "eth-up-or-down-15m",
+        "market_type": "crypto_15m",
+        "crypto": "ETH"
+    },
+    "eth_5m": {
+        "series_id": None,  # Will be discovered via API
+        "series_slug": "eth-up-or-down-5m",
+        "market_type": "crypto_5m",
+        "crypto": "ETH"
+    },
+    
+    # SOL Markets
+    "sol_15m": {
+        "series_id": None,  # Will be discovered via API
+        "series_slug": "sol-up-or-down-15m",
+        "market_type": "crypto_15m",
+        "crypto": "SOL"
+    },
+    "sol_5m": {
+        "series_id": None,  # Will be discovered via API
+        "series_slug": "sol-up-or-down-5m",
+        "market_type": "crypto_5m",
+        "crypto": "SOL"
+    },
+    
+    # XRP Markets
+    "xrp_15m": {
+        "series_id": None,  # Will be discovered via API
+        "series_slug": "xrp-up-or-down-15m",
+        "market_type": "crypto_15m",
+        "crypto": "XRP"
+    },
+    "xrp_5m": {
+        "series_id": None,  # Will be discovered via API
+        "series_slug": "xrp-up-or-down-5m",
+        "market_type": "crypto_5m",
+        "crypto": "XRP"
+    },
 }
 
 # Polymarket live data WebSocket (the correct one!)
