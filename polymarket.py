@@ -106,11 +106,17 @@ class PolymarketScanner:
                         events = response.json()
                         log.info(f"   ✅ Series {series_slug}: found {len(events)} events")
                         
-                        # Extract markets from events
+                        # Extract markets from events and copy event end time to markets
                         series_markets = []
                         for event in events:
+                            event_end_time = event.get("end_date_iso") or event.get("endDateIso") or event.get("end_date")
                             event_markets = event.get("markets", [])
-                            series_markets.extend(event_markets)
+                            
+                            # Copy event end time to each market (markets often missing this field)
+                            for market in event_markets:
+                                if not market.get("end_date_iso") and event_end_time:
+                                    market["end_date_iso"] = event_end_time
+                                series_markets.append(market)
                             
                             # Log first sample only
                             if event_markets and len(series_markets) == len(event_markets):
@@ -361,12 +367,33 @@ class PolymarketScanner:
             yes_token_id = tokens[0].get("token_id", "") if len(tokens) > 0 else ""
             no_token_id = tokens[1].get("token_id", "") if len(tokens) > 1 else ""
             
-            # Parse end time
-            end_date_str = data.get("endDate", "")
+            # Parse end time - CRITICAL FIX
+            # Try multiple fields in order of preference
+            end_date_str = (
+                data.get("end_date_iso") or 
+                data.get("endDateIso") or 
+                data.get("endDate") or 
+                data.get("end_date") or
+                ""
+            )
+            
             try:
-                end_time = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-            except:
-                end_time = datetime.now(timezone.utc) + timedelta(hours=1)
+                if end_date_str:
+                    # Parse ISO format datetime
+                    end_time = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                else:
+                    # NO DEFAULT! If we don't have end time, skip this market
+                    log.warning(f"Market missing end_date, skipping: {question[:60]}")
+                    return None
+            except Exception as e:
+                log.warning(f"Failed to parse end_date '{end_date_str}' for market: {question[:60]}")
+                return None
+            
+            # Validate end time is not in past
+            now = datetime.now(timezone.utc)
+            if end_time < now - timedelta(minutes=10):
+                log.debug(f"Skipping expired market: {question[:60]} (ended {(now - end_time).total_seconds()/60:.0f} min ago)")
+                return None
             
             # Additional metrics
             liquidity = float(data.get("liquidity", 0))
