@@ -83,40 +83,14 @@ class PolymarketScanner:
                     series_slug = series_info["series_slug"]
                     crypto = series_info.get("crypto", "CRYPTO")
                     
-                    log.info(f"   Fetching series: {series_slug} ({crypto})")
-                    
-                    # If series_id is unknown, try to discover it by fetching a recent event
+                    # Skip if series_id is not configured
                     if series_id is None:
-                        try:
-                            # Search for recent events with this slug pattern
-                            search_response = requests.get(
-                                f"{POLYMARKET_GAMMA_API}/events",
-                                params={
-                                    "active": True,
-                                    "closed": False,
-                                    "limit": 1
-                                },
-                                timeout=API_TIMEOUT
-                            )
-                            
-                            if search_response.status_code == 200:
-                                events = search_response.json()
-                                for event in events:
-                                    event_slug = event.get("slug", "")
-                                    if series_slug.replace("-15m", "").replace("-5m", "") in event_slug:
-                                        series_id = event.get("series")
-                                        if series_id:
-                                            log.info(f"   ✅ Discovered series_id: {series_id} for {series_slug}")
-                                            break
-                        except Exception as e:
-                            log.debug(f"Series ID discovery failed for {series_slug}: {e}")
-                    
-                    # If we still don't have series_id, skip this series
-                    if series_id is None:
-                        log.debug(f"   ⏭️  Skipping {series_slug} (series_id unknown)")
+                        log.debug(f"   ⏭️  Skipping {series_slug} (series_id not configured)")
                         continue
                     
-                    # CORRECT: Query /events endpoint with series_id (not /markets)
+                    log.info(f"   Fetching series: {series_slug} ({crypto}) - ID: {series_id}")
+                    
+                    # Query /events endpoint with series_id
                     response = requests.get(
                         f"{POLYMARKET_GAMMA_API}/events",
                         params={
@@ -138,13 +112,13 @@ class PolymarketScanner:
                             event_markets = event.get("markets", [])
                             series_markets.extend(event_markets)
                             
-                            # Log sample (first one only)
+                            # Log first sample only
                             if event_markets and len(series_markets) == len(event_markets):
                                 sample = event_markets[0]
                                 q = sample.get("question", "")
-                                log.info(f"   📋 Market: '{q[:70]}'")
+                                log.info(f"   📋 Sample market: '{q[:70]}'")
                         
-                        log.info(f"   Total markets in series: {len(series_markets)}")
+                        log.info(f"   📊 Total markets in series: {len(series_markets)}")
                         all_markets.extend(series_markets)
                     else:
                         log.debug(f"Series fetch returned {response.status_code}")
@@ -199,8 +173,31 @@ class PolymarketScanner:
             
             if response.status_code == 200:
                 general_markets = response.json()
-                all_markets.extend(general_markets)
-                log.info(f"   Got {len(general_markets)} general markets")
+                
+                # Filter out markets that already ended (API sometimes returns stale data)
+                now = datetime.now(timezone.utc)
+                valid_markets = []
+                filtered_count = 0
+                
+                for market in general_markets:
+                    end_time_str = market.get("end_date_iso") or market.get("end_date")
+                    if end_time_str:
+                        try:
+                            end_time = datetime.fromisoformat(end_time_str.replace('Z', '+00:00'))
+                            # Only include markets that end in the future or ended within last 5 minutes
+                            if end_time > now - timedelta(minutes=5):
+                                valid_markets.append(market)
+                            else:
+                                filtered_count += 1
+                        except:
+                            # If can't parse time, include it anyway
+                            valid_markets.append(market)
+                    else:
+                        # No end time, include it
+                        valid_markets.append(market)
+                
+                all_markets.extend(valid_markets)
+                log.info(f"   Got {len(valid_markets)} valid markets (filtered {filtered_count} expired)")
             else:
                 log.error(f"General market fetch failed: {response.status_code}")
             
