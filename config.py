@@ -37,12 +37,13 @@ POLYMARKET_SERIES = {
         "market_type": "crypto_15m",
         "crypto": "BTC"
     },
-    "btc_5m": {
-        "series_id": "10193",  # 🧪 Testing - try this first, then 10190 if fails
-        "series_slug": "btc-up-or-down-5m",
-        "market_type": "crypto_5m",
-        "crypto": "BTC"
-    },
+    # Temporarily disabled - test after fixing market loading
+    # "btc_5m": {
+    #     "series_id": "10193",  # 🧪 Testing - try this first, then 10190 if fails
+    #     "series_slug": "btc-up-or-down-5m",
+    #     "market_type": "crypto_5m",
+    #     "crypto": "BTC"
+    # },
 }
 
 # To add more cryptos, find their series IDs manually:
