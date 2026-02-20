@@ -28,63 +28,38 @@ POLYMARKET_GAMMA_API = "https://gamma-api.polymarket.com"
 
 # Polymarket Series IDs for crypto markets
 # These are the "channels" that contain the rotating short-duration markets
+
+# Currently working series (confirmed):
 POLYMARKET_SERIES = {
-    # BTC Markets
     "btc_15m": {
-        "series_id": "10192",  # Confirmed working!
+        "series_id": "10192",  # ✅ Confirmed working - 97 markets
         "series_slug": "btc-up-or-down-15m",
         "market_type": "crypto_15m",
         "crypto": "BTC"
     },
-    "btc_5m": {
-        "series_id": None,  # Will be discovered via API
-        "series_slug": "btc-up-or-down-5m",
-        "market_type": "crypto_5m",
-        "crypto": "BTC"
-    },
-    
-    # ETH Markets
-    "eth_15m": {
-        "series_id": None,  # Will be discovered via API
-        "series_slug": "eth-up-or-down-15m",
-        "market_type": "crypto_15m",
-        "crypto": "ETH"
-    },
-    "eth_5m": {
-        "series_id": None,  # Will be discovered via API
-        "series_slug": "eth-up-or-down-5m",
-        "market_type": "crypto_5m",
-        "crypto": "ETH"
-    },
-    
-    # SOL Markets
-    "sol_15m": {
-        "series_id": None,  # Will be discovered via API
-        "series_slug": "sol-up-or-down-15m",
-        "market_type": "crypto_15m",
-        "crypto": "SOL"
-    },
-    "sol_5m": {
-        "series_id": None,  # Will be discovered via API
-        "series_slug": "sol-up-or-down-5m",
-        "market_type": "crypto_5m",
-        "crypto": "SOL"
-    },
-    
-    # XRP Markets
-    "xrp_15m": {
-        "series_id": None,  # Will be discovered via API
-        "series_slug": "xrp-up-or-down-15m",
-        "market_type": "crypto_15m",
-        "crypto": "XRP"
-    },
-    "xrp_5m": {
-        "series_id": None,  # Will be discovered via API
-        "series_slug": "xrp-up-or-down-5m",
-        "market_type": "crypto_5m",
-        "crypto": "XRP"
-    },
 }
+
+# To add more cryptos, find their series IDs manually:
+# 1. Visit polymarket.com and find an active market
+# 2. Look at the URL: polymarket.com/event/eth-updown-15m-XXXXX
+# 3. Open browser dev tools → Network tab
+# 4. Find the API call for that event
+# 5. Look for the "series" field in the response
+# 6. Add it here following the pattern above
+#
+# Example (uncomment when you have the series_id):
+# "eth_15m": {
+#     "series_id": "10XXX",  # Replace with actual ID
+#     "series_slug": "eth-up-or-down-15m",
+#     "market_type": "crypto_15m",
+#     "crypto": "ETH"
+# },
+# "eth_5m": {
+#     "series_id": "10XXX",  # Replace with actual ID
+#     "series_slug": "eth-up-or-down-5m",
+#     "market_type": "crypto_5m",
+#     "crypto": "ETH"
+# },
 
 # Polymarket live data WebSocket (the correct one!)
 POLYMARKET_LIVE_WS_URL = "wss://ws-live-data.polymarket.com"
@@ -99,6 +74,12 @@ class TradingConfig:
     
     # Minimum edge to consider an opportunity (higher = fewer but better trades)
     min_edge_percent: float = 3.0  # 3% minimum mispricing
+    
+    # Time buffers (automatically adjusted per market type)
+    # - 5-min markets: Skip last 1 minute (trade in first 4 min)
+    # - 15-min markets: Skip last 3 minutes (trade in first 12 min)
+    # - 1-hour markets: Skip last 10 minutes (trade in first 50 min)
+    # This prevents trading when outcomes become obvious near market close
     
     # Position sizing
     default_position_size: float = 50.0  # $50 USD per trade
